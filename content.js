@@ -32,7 +32,7 @@ export function questions(items, allowEmpty=false) {
 }
 
 export async function contentRoutes(app, auth, {db,save,dataDir}) {
- const uploads=join(dataDir,'uploads');await mkdir(uploads,{recursive:true});
+ const uploads=process.env.UPLOAD_DIR || join(dataDir,'uploads');await mkdir(uploads,{recursive:true});
  const upload=multer({storage:multer.diskStorage({destination:uploads,filename:(_,file,cb)=>cb(null,randomUUID()+extname(file.originalname).toLowerCase())}),limits:{fileSize:250*1024*1024,files:1,fields:0},fileFilter:(_,file,cb)=>{
   const extension=extname(file.originalname).toLowerCase();
   if(!['.mp4','.webm'].includes(extension)||!['video/mp4','video/webm'].includes(file.mimetype))return cb(Object.assign(new Error('MP4 эсвэл WebM видео сонгоно уу.'),{status:400}));cb(null,true);

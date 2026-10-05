@@ -89,3 +89,18 @@ These scripts create sample learning content. Review examples before using them
 for clinical education. `seed-demo-content.js` additionally requires
 `DEMO_ASSET_DIR` pointing to the separate Flutter app's assets directory; media
 assets are not included here.
+
+## Course video storage
+
+Admin → Courses → add/edit subcourse → upload an MP4 or WebM (up to 250 MB),
+then save the subcourse. The API returns an `/uploads/...` URL saved on that lesson.
+The Flutter lesson player streams this URL and supports byte-range seeking.
+Use MP4 with H.264 video and AAC audio for broad device compatibility.
+
+By default files live under `DATA_DIR/uploads`. Set `UPLOAD_DIR` to an absolute
+path on a persistent mounted disk if media should live separately from the JSON
+database. Keep this disk across deployments and include it in backups. An
+ordinary ephemeral hosting filesystem will lose uploads on redeploy. No cloud
+bucket is provisioned by this setting. The `/uploads` route currently serves
+files by URL publicly; private premium video delivery requires signed URLs or
+an authenticated media gateway before production distribution.

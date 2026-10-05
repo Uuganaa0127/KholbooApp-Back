@@ -11,7 +11,7 @@ test('course, lesson, answers, uploads, edits and persistence', async () => {
  const port=4193, password=randomBytes(16).toString('hex');
  let child;
  async function start() {
-  child=spawn(process.execPath,['src.js'],{cwd:new URL('../',import.meta.url),env:{...process.env,PORT:String(port),DATA_DIR:directory,ADMIN_EMAIL:'test@example.test',ADMIN_PASSWORD:password,JWT_SECRET:randomBytes(32).toString('hex')},stdio:'pipe'});
+  child=spawn(process.execPath,['src.js'],{cwd:new URL('../',import.meta.url),env:{...process.env,PORT:String(port),DATA_DIR:directory,UPLOAD_DIR:join(directory,'media'),ADMIN_EMAIL:'test@example.test',ADMIN_PASSWORD:password,JWT_SECRET:randomBytes(32).toString('hex')},stdio:'pipe'});
   let output='';child.stderr.on('data',chunk=>output+=chunk);
   for(let i=0;i<60;i++){ if(child.exitCode!==null) throw new Error(output);try {const r=await fetch(`http://127.0.0.1:${port}/api/health`);if(r.ok)return;}catch{}await new Promise(r=>setTimeout(r,100)); }
   throw new Error('Server failed to start '+output);
