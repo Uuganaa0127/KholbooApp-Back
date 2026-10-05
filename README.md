@@ -104,3 +104,28 @@ ordinary ephemeral hosting filesystem will lose uploads on redeploy. No cloud
 bucket is provisioned by this setting. The `/uploads` route currently serves
 files by URL publicly; private premium video delivery requires signed URLs or
 an authenticated media gateway before production distribution.
+
+## Free Premium and account safety
+
+Premium is a free contribution award: an active user's `memberLevel: premium`
+grants access regardless of the legacy `paymentStatus` field. Only admins can
+award it. Registration never accepts caller-supplied admin/Premium privileges.
+
+- `POST /api/account/register`: name, email, password (8–72 characters), optional
+  profession, and consent. Creates a normal learner; sign in afterward.
+- `POST /api/account/delete`: current password and `confirmation: DELETE`.
+  Removes active learner data and invalidates tokens. Admin accounts cannot use
+  this route. External Youth Health records and separately managed backups need
+  their own retention/deletion process. Legacy replies without account ownership
+  metadata require administrator review.
+- `POST /api/account/reports`: postId, optional replyIndex, and reason.
+- `POST /api/account/blocks`: postId and optional replyIndex. Blocking filters
+  content in both directions without exposing anonymous account IDs.
+- `GET /api/account/blocks`; `POST /api/account/blocks/:id/remove`.
+- Admin `GET /api/reports`; `PATCH /api/reports/:id` with action reviewed,
+  dismissed, hide or suspend.
+- Admin `GET/PATCH /api/policy`: operator, supportEmail, privacyEmail, privacyUrl
+  and retention. Public contact details are served at `/api/public/policy`.
+
+Configure actual legal/support details before release. Reports need regular human
+moderation. These workflows do not replace a production privacy/security review.

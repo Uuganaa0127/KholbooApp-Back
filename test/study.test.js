@@ -62,10 +62,10 @@ test('practice resumes, grades on server, restarts safely; profession and survey
   assert.equal((await api('/public/practice')).data.find(x=>x.id===premium.id).questionItems.length,0);
   assert.equal((await api(`/account/practice/${premium.id}/start`,token,{})).status,403);
   const userId=(await api('/account/me',token)).data.user.id;
-  await api(`/users/${userId}`,admin,{memberLevel:'premium',paymentStatus:'trial'},'PATCH');
+  await api(`/users/${userId}`,admin,{memberLevel:'premium',paymentStatus:'unpaid'},'PATCH');
   assert.equal((await api('/account/practice',token)).data.find(x=>x.id===premium.id).locked,false);
   const pp=(await api(`/account/practice/${premium.id}/start`,token,{})).data.practice[premium.id];
-  await api(`/users/${userId}`,admin,{paymentStatus:'unpaid'},'PATCH');
+  await api(`/users/${userId}`,admin,{memberLevel:'bronze',paymentStatus:'unpaid'},'PATCH');
   assert.equal((await api(`/account/practice/${premium.id}/answer`,token,{attemptId:pp.attemptId,answers:[1]})).status,403);
   assert.equal((await api('/account/me',token)).data.practice[premium.id],undefined);
   const screening={requestId:'screening-test-123',patientCode:'P001',patientName:'Sample Patient',age:35,sex:'Эмэгтэй',heightCm:170,weightKg:70,waistCm:85,bloodPressureUsed:true,glucoseUsed:true,systolic:120,diastolic:80,glucose:5.2};

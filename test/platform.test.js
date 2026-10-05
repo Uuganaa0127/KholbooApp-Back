@@ -46,11 +46,11 @@ test('connected courses, accounts, stories, anonymous moderation and once-only r
  const costly=(await api('/courses',admin,{title:'Membership',premium:true,priceCoins:200})).data;
  assert.equal((await api(`/account/courses/${costly.id}/purchase`,token,{})).status,409);
  await api('/users/'+user.id,admin,{memberLevel:'premium',paymentStatus:'unpaid'},'PATCH');
- assert.equal((await api('/account/courses',token)).data.find(c=>c.id===costly.id).locked,true);
+ assert.equal((await api('/account/courses',token)).data.find(c=>c.id===costly.id).locked,false);
  await api('/users/'+user.id,admin,{paymentStatus:'paid'},'PATCH');
  assert.equal((await api('/account/courses',token)).data.find(c=>c.id===costly.id).locked,false);
  await api(`/account/courses/${costly.id}/purchase`,token,{});assert.equal((await api('/account/me',token)).data.balance,62);
- await api('/users/'+user.id,admin,{paymentStatus:'unpaid'},'PATCH');
+ await api('/users/'+user.id,admin,{memberLevel:'bronze',paymentStatus:'unpaid'},'PATCH');
  assert.equal((await api('/account/courses',token)).data.find(c=>c.id===costly.id).locked,true);
  assert.equal((await api('/account/courses',token)).data.find(c=>c.id===premium.id).locked,false);
  await stop();await start();assert.equal((await api('/account/me',token)).data.balance,62);
