@@ -111,6 +111,29 @@ bucket is provisioned by this setting. The `/uploads` route currently serves
 files by URL publicly; private premium video delivery requires signed URLs or
 an authenticated media gateway before production distribution.
 
+## youthhealthpf.mn production deployment
+
+The React admin and this API are deployed beside the existing Youth Health website. They do not replace its frontend or database:
+
+- Admin: `https://youthhealthpf.mn/app-admin/`
+- App API: `https://youthhealthpf.mn/app-api/`
+- Uploaded media: `https://youthhealthpf.mn/uploads/`
+
+Keep `KholbooApp-Admin` and `KholbooApp-Back` as sibling directories. Copy both to `/home/cloudmn/kholboo-app/` on `103.41.113.25`. In `KholbooApp-Back`, copy `.env.example` to `.env`, generate unique values for `JWT_SECRET` and `ADMIN_PASSWORD`, and set file mode `600`. `ADMIN_PASSWORD` is only used when the persistent database is first created; keep the generated login securely.
+
+Run `docker compose config --quiet` and `docker compose up -d --build`. Before making the routes public, verify:
+
+```sh
+curl -fsS http://127.0.0.1:4105/api/health
+curl -I http://127.0.0.1:4106/app-admin/
+```
+
+For later releases, run `make deploy` from `KholbooApp-Back`. The Makefile tests both projects, builds `linux/amd64` images, uploads code and images, loads them on the server, starts Compose without pulling from Docker Hub, and prints container status. Useful operations are `make status`, `make health`, `make logs`, `make restart`, and `make nginx-check`.
+
+Add the locations in `nginx-host-locations.conf` to the existing HTTPS `server` block for `youthhealthpf.mn`, then run `nginx -t` and reload Nginx. Existing `/` and `/api/` website routes must remain in place. The mobile application should use `https://youthhealthpf.mn/app-api` as `API_BASE_URL`.
+
+The `kholboo-app_app-data` Docker volume contains all app JSON records and uploaded media. Back it up before upgrades and run only one backend replica because storage is file based.
+
 ## Free Premium and account safety
 
 Premium is a free contribution award: an active user's `memberLevel: premium`

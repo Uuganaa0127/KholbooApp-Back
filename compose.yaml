@@ -1,0 +1,29 @@
+name: kholboo-app
+
+services:
+  admin:
+    image: kholboo-app-admin:deploy
+    platform: linux/amd64
+    build:
+      context: ../KholbooApp-Admin
+      args:
+        VITE_API_URL: /app-api
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${ADMIN_PORT:-4106}:80"
+
+  backend:
+    image: kholboo-app-backend:deploy
+    platform: linux/amd64
+    build: .
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-4105}:4100"
+    volumes:
+      - app-data:/app/data
+
+volumes:
+  app-data:

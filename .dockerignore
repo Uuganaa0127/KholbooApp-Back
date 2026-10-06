@@ -1,0 +1,8 @@
+node_modules
+.git
+.env*
+LOCAL-ACCESS.md
+data
+coverage
+*.log
+.DS_Store
