@@ -3,6 +3,12 @@
 Express API for the Youth Med learning app and React admin. This repository
 contains the backend only; the Flutter app and React admin are separate projects.
 
+## Start reading here
+
+- [Developer guide](docs/DEVELOPMENT.md): code map, request flow, storage rules and contribution workflow.
+- [Route index](docs/ROUTES.md): endpoint locations and authentication middleware.
+- Run `npm run format` before committing; CI checks formatting and integration tests.
+
 ## Local setup
 
 Use Node.js 22 or newer and npm.

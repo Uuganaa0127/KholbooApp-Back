@@ -1,0 +1,6 @@
+node_modules/
+data/
+.env*
+LOCAL-ACCESS.md
+coverage/
+package-lock.json

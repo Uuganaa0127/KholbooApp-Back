@@ -1,87 +1,410 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
-import {join} from 'node:path';
-import {spawn} from 'node:child_process';
-import {randomBytes} from 'node:crypto';
-test('practice resumes, grades on server, restarts safely; profession and surveys persist',async()=>{
- const dir=await mkdtemp(join(tmpdir(),'youth-study-')),password=randomBytes(16).toString('hex'),secret=randomBytes(32).toString('hex');let child;
- const start=async()=>{child=spawn(process.execPath,['src.js'],{cwd:new URL('../',import.meta.url),env:{...process.env,PORT:'4195',DATA_DIR:dir,ADMIN_EMAIL:'admin@test.test',ADMIN_PASSWORD:password,JWT_SECRET:secret},stdio:'pipe'});for(let i=0;i<80;i++){try{if((await fetch('http://127.0.0.1:4195/api/health')).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw Error('Server failed');};
- const stop=async()=>{if(child?.exitCode===null)await new Promise(r=>{child.once('exit',r);child.kill();});};
- const api=async(path,token,body,method)=>{const r=await fetch('http://127.0.0.1:4195/api'+path,{method:method||(body?'POST':'GET'),headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})},body:body?JSON.stringify(body):undefined});return {status:r.status,data:await r.json()};};
- try{
-  await start();const admin=(await api('/auth/login',null,{email:'admin@test.test',password})).data.token;
-  await api('/users',admin,{name:'Learner',email:'learner@test.test',password,role:'learner',memberLevel:'bronze',paymentStatus:'unpaid',active:true});const token=(await api('/account/login',null,{email:'learner@test.test',password})).data.token;
-  assert.equal((await api('/account/profile',token,{profession:'Хүүхэд',role:'admin'},'PATCH')).data.user.role,'learner');assert.equal((await api('/account/me',token)).data.user.profession,'Хүүхэд');assert.equal((await api('/account/profile',token,{profession:'invalid'},'PATCH')).status,400);
-  const qs=[{prompt:'Choose B',options:['A','B'],answer:1,explanation:'B',topic:'Communication',difficulty:'medium',source:'https://example.org/reference'},{prompt:'Choose A',options:['A','B'],answer:0,explanation:'A'}];
-  const t=(await api('/tests',admin,{title:'Practice',category:'Хүүхэд',kind:'case',professions:['Хүүхэд'],questionItems:qs})).data;
-  const catalog=(await api('/public/practice')).data;assert.equal(catalog[0].questionItems[0].answer,undefined);assert.equal(catalog[0].kind,'case');
-  assert.equal((await api(`/account/practice/${t.id}/start`,null,{})).status,401);
-  let p=(await api(`/account/practice/${t.id}/start`,token,{})).data.practice[t.id];
-  assert.equal((await api(`/account/practice/${t.id}/answer`,token,{attemptId:p.attemptId,answers:[1,0]})).status,409);
-  let first=await api(`/account/practice/${t.id}/answer`,token,{attemptId:p.attemptId,answers:[1]});assert.deepEqual(first.data.practice[t.id].answers,[1]);assert.equal(first.data.practice[t.id].completed,false);
-  assert.equal((await api(`/account/practice/${t.id}/answer`,token,{attemptId:p.attemptId,answers:[1]})).status,200);
-  await stop();await start();assert.deepEqual((await api('/account/me',token)).data.practice[t.id].answers,[1]);
-  assert.equal((await api(`/account/practice/${t.id}/start`,token,{})).data.practice[t.id].attemptId,p.attemptId);
-  await Promise.all([api(`/account/practice/${t.id}/answer`,token,{attemptId:p.attemptId,answers:[1,0]}),api(`/account/practice/${t.id}/answer`,token,{attemptId:p.attemptId,answers:[1,0]})]);
-  let me=(await api('/account/me',token)).data;assert.equal(me.user.xp,20);assert.equal(me.practice[t.id].scorePercent,100);assert.equal(me.practice[t.id].attempts,1);
-  const old=p.attemptId;p=(await api(`/account/practice/${t.id}/start`,token,{restart:true})).data.practice[t.id];assert.notEqual(p.attemptId,old);assert.equal(p.bestPercent,100);assert.equal(p.completed,false);
-  assert.equal((await api(`/account/practice/${t.id}/answer`,token,{attemptId:old,answers:[1]})).status,409);
-  await api(`/account/practice/${t.id}/answer`,token,{attemptId:p.attemptId,answers:[0]});await api(`/account/practice/${t.id}/answer`,token,{attemptId:p.attemptId,answers:[0,1]});me=(await api('/account/me',token)).data;assert.equal(me.practice[t.id].scorePercent,0);assert.equal(me.practice[t.id].bestPercent,100);assert.equal(me.user.xp,20);
-  assert.equal((await api('/analytics',token)).status,403);
-  let analytics=(await api('/analytics',admin)).data;assert.equal(analytics.funnel.started,2);assert.equal(analytics.funnel.completed,2);assert.equal(analytics.questions.reduce((n,q)=>n+q.n,0),2);
-  me=(await api('/account/me',token)).data;assert.ok(me.learningPlan.weak.length);assert.ok(me.practice[t.id].nextReviewAt);assert.equal(me.practice[t.id].feedback.length,2);
-  const payload={id:'event-test-12345',type:'search',target:'practice_search',resultCount:0,query:'must not store'};
-  await api('/account/events',token,payload);await api('/account/events',token,payload);assert.equal((await api('/analytics',admin)).data.emptySearches,1);
-  assert.equal((await api('/account/events',token,{...payload,id:'event-test-23456',type:'answer'})).status,400);
-  await api(`/tests/${t.id}`,admin,{questionItems:[qs[0]]},'PATCH');assert.equal((await api(`/account/practice/${t.id}/answer`,token,{attemptId:p.attemptId,answers:[1]})).status,409);
-  const survey=(await api('/surveys',admin,{title:'Feedback',active:true,questions:['Useful?','Easy?']})).data;
-  assert.equal((await api('/surveys',token)).status,403);assert.equal((await api(`/account/surveys/${survey.id}`,token,{answers:[5]})).status,400);
-  await Promise.all([api(`/account/surveys/${survey.id}`,token,{answers:[5,3]}),api(`/account/surveys/${survey.id}`,token,{answers:[5,3]})]);
-  const stats=(await api('/surveys',admin)).data[0];assert.equal(stats.responseCount,1);assert.deepEqual(stats.averages,[5,3]);assert.equal((await api('/account/me',token)).data.surveyCompleted[0],survey.id);
-  assert.equal((await api('/public/surveys')).data[0].responses,undefined);
-  assert.equal((await api(`/surveys/${survey.id}`,admin,{questions:['Changed']},'PATCH')).status,409);
-  await api(`/surveys/${survey.id}`,admin,{active:false},'PATCH');assert.equal((await api('/public/surveys')).data.length,0);
-  const c=(await api('/courses',admin,{title:'Course'})).data,l=(await api(`/courses/${c.id}/lessons`,admin,{title:'Lesson',description:'Read me',durationMinutes:2,questionItems:qs})).data;
-  assert.equal((await api(`/courses/${c.id}/pre-test`,admin,{title:'Baseline',questionItems:qs},'PATCH')).status,200);
-  const publicCourse=(await api('/public/courses')).data.find(x=>x.id===c.id);assert.equal(publicCourse.preTest.questionItems[0].answer,undefined);
-  assert.equal((await api(`/account/courses/${c.id}/lessons/${l.id}/test`,token,{answers:[1,0]})).status,409);
-  const before=await api(`/account/courses/${c.id}/pre-test`,token,{answers:[0,1]});assert.equal(before.data.score,0);
-  assert.equal((await api(`/account/courses/${c.id}/pre-test`,token,{answers:[1,0]})).data.score,0);
-  const failed=await api(`/account/courses/${c.id}/lessons/${l.id}/test`,token,{answers:[0,0]});assert.equal(failed.data.score,1);assert.equal(failed.data.passed,false);assert.equal(failed.data.progress[c.id].lessons.length,0);
-  const passed=await api(`/account/courses/${c.id}/lessons/${l.id}/test`,token,{answers:[1,0]});assert.equal(passed.data.passed,true);assert.equal(passed.data.progress[c.id].lessons[0],l.id);
-  await api(`/courses/${c.id}/test`,admin,{title:'Post',passPercent:80,questionItems:qs},'PATCH');
-  const post=await api(`/account/courses/${c.id}/exam`,token,{answers:[1,0]});assert.equal(post.data.passed,true);
-  await api(`/account/courses/${c.id}/exam`,token,{answers:[0,1]});
-  analytics=(await api('/analytics',admin)).data;const result=analytics.courses.find(x=>x.id===c.id);assert.equal(result.paired,1);assert.equal(result.improvement,100);assert.equal(result.completion,100);
-  await api(`/courses/${c.id}/pre-test`,admin,{title:'Baseline revised',questionItems:[qs[0]]},'PATCH');assert.equal((await api('/analytics',admin)).data.courses.find(x=>x.id===c.id).paired,0);
-  await stop();await start();assert.equal((await api('/analytics',admin)).data.emptySearches,1);
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
+test('practice resumes, grades on server, restarts safely; profession and surveys persist', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'youth-study-')),
+    password = randomBytes(16).toString('hex'),
+    secret = randomBytes(32).toString('hex');
+  let child;
+  const start = async () => {
+    child = spawn(process.execPath, ['src.js'], {
+      cwd: new URL('../', import.meta.url),
+      env: {
+        ...process.env,
+        PORT: '4195',
+        DATA_DIR: dir,
+        ADMIN_EMAIL: 'admin@test.test',
+        ADMIN_PASSWORD: password,
+        JWT_SECRET: secret,
+      },
+      stdio: 'pipe',
+    });
+    for (let i = 0; i < 80; i++) {
+      try {
+        if ((await fetch('http://127.0.0.1:4195/api/health')).ok) return;
+      } catch {}
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    throw Error('Server failed');
+  };
+  const stop = async () => {
+    if (child?.exitCode === null)
+      await new Promise((r) => {
+        child.once('exit', r);
+        child.kill();
+      });
+  };
+  const api = async (path, token, body, method) => {
+    const r = await fetch('http://127.0.0.1:4195/api' + path, {
+      method: method || (body ? 'POST' : 'GET'),
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return { status: r.status, data: await r.json() };
+  };
+  try {
+    await start();
+    const admin = (await api('/auth/login', null, { email: 'admin@test.test', password })).data
+      .token;
+    await api('/users', admin, {
+      name: 'Learner',
+      email: 'learner@test.test',
+      password,
+      role: 'learner',
+      memberLevel: 'bronze',
+      paymentStatus: 'unpaid',
+      active: true,
+    });
+    const token = (await api('/account/login', null, { email: 'learner@test.test', password })).data
+      .token;
+    assert.equal(
+      (await api('/account/profile', token, { profession: 'Хүүхэд', role: 'admin' }, 'PATCH')).data
+        .user.role,
+      'learner',
+    );
+    assert.equal((await api('/account/me', token)).data.user.profession, 'Хүүхэд');
+    assert.equal(
+      (await api('/account/profile', token, { profession: 'invalid' }, 'PATCH')).status,
+      400,
+    );
+    const qs = [
+      {
+        prompt: 'Choose B',
+        options: ['A', 'B'],
+        answer: 1,
+        explanation: 'B',
+        topic: 'Communication',
+        difficulty: 'medium',
+        source: 'https://example.org/reference',
+      },
+      { prompt: 'Choose A', options: ['A', 'B'], answer: 0, explanation: 'A' },
+    ];
+    const t = (
+      await api('/tests', admin, {
+        title: 'Practice',
+        category: 'Хүүхэд',
+        kind: 'case',
+        professions: ['Хүүхэд'],
+        questionItems: qs,
+      })
+    ).data;
+    const catalog = (await api('/public/practice')).data;
+    assert.equal(catalog[0].questionItems[0].answer, undefined);
+    assert.equal(catalog[0].kind, 'case');
+    assert.equal((await api(`/account/practice/${t.id}/start`, null, {})).status, 401);
+    let p = (await api(`/account/practice/${t.id}/start`, token, {})).data.practice[t.id];
+    assert.equal(
+      (
+        await api(`/account/practice/${t.id}/answer`, token, {
+          attemptId: p.attemptId,
+          answers: [1, 0],
+        })
+      ).status,
+      409,
+    );
+    let first = await api(`/account/practice/${t.id}/answer`, token, {
+      attemptId: p.attemptId,
+      answers: [1],
+    });
+    assert.deepEqual(first.data.practice[t.id].answers, [1]);
+    assert.equal(first.data.practice[t.id].completed, false);
+    assert.equal(
+      (
+        await api(`/account/practice/${t.id}/answer`, token, {
+          attemptId: p.attemptId,
+          answers: [1],
+        })
+      ).status,
+      200,
+    );
+    await stop();
+    await start();
+    assert.deepEqual((await api('/account/me', token)).data.practice[t.id].answers, [1]);
+    assert.equal(
+      (await api(`/account/practice/${t.id}/start`, token, {})).data.practice[t.id].attemptId,
+      p.attemptId,
+    );
+    await Promise.all([
+      api(`/account/practice/${t.id}/answer`, token, { attemptId: p.attemptId, answers: [1, 0] }),
+      api(`/account/practice/${t.id}/answer`, token, { attemptId: p.attemptId, answers: [1, 0] }),
+    ]);
+    let me = (await api('/account/me', token)).data;
+    assert.equal(me.user.xp, 20);
+    assert.equal(me.practice[t.id].scorePercent, 100);
+    assert.equal(me.practice[t.id].attempts, 1);
+    const old = p.attemptId;
+    p = (await api(`/account/practice/${t.id}/start`, token, { restart: true })).data.practice[
+      t.id
+    ];
+    assert.notEqual(p.attemptId, old);
+    assert.equal(p.bestPercent, 100);
+    assert.equal(p.completed, false);
+    assert.equal(
+      (await api(`/account/practice/${t.id}/answer`, token, { attemptId: old, answers: [1] }))
+        .status,
+      409,
+    );
+    await api(`/account/practice/${t.id}/answer`, token, { attemptId: p.attemptId, answers: [0] });
+    await api(`/account/practice/${t.id}/answer`, token, {
+      attemptId: p.attemptId,
+      answers: [0, 1],
+    });
+    me = (await api('/account/me', token)).data;
+    assert.equal(me.practice[t.id].scorePercent, 0);
+    assert.equal(me.practice[t.id].bestPercent, 100);
+    assert.equal(me.user.xp, 20);
+    assert.equal((await api('/analytics', token)).status, 403);
+    let analytics = (await api('/analytics', admin)).data;
+    assert.equal(analytics.funnel.started, 2);
+    assert.equal(analytics.funnel.completed, 2);
+    assert.equal(
+      analytics.questions.reduce((n, q) => n + q.n, 0),
+      2,
+    );
+    me = (await api('/account/me', token)).data;
+    assert.ok(me.learningPlan.weak.length);
+    assert.ok(me.practice[t.id].nextReviewAt);
+    assert.equal(me.practice[t.id].feedback.length, 2);
+    const payload = {
+      id: 'event-test-12345',
+      type: 'search',
+      target: 'practice_search',
+      resultCount: 0,
+      query: 'must not store',
+    };
+    await api('/account/events', token, payload);
+    await api('/account/events', token, payload);
+    assert.equal((await api('/analytics', admin)).data.emptySearches, 1);
+    assert.equal(
+      (await api('/account/events', token, { ...payload, id: 'event-test-23456', type: 'answer' }))
+        .status,
+      400,
+    );
+    await api(`/tests/${t.id}`, admin, { questionItems: [qs[0]] }, 'PATCH');
+    assert.equal(
+      (
+        await api(`/account/practice/${t.id}/answer`, token, {
+          attemptId: p.attemptId,
+          answers: [1],
+        })
+      ).status,
+      409,
+    );
+    const survey = (
+      await api('/surveys', admin, {
+        title: 'Feedback',
+        active: true,
+        questions: ['Useful?', 'Easy?'],
+      })
+    ).data;
+    assert.equal((await api('/surveys', token)).status, 403);
+    assert.equal((await api(`/account/surveys/${survey.id}`, token, { answers: [5] })).status, 400);
+    await Promise.all([
+      api(`/account/surveys/${survey.id}`, token, { answers: [5, 3] }),
+      api(`/account/surveys/${survey.id}`, token, { answers: [5, 3] }),
+    ]);
+    const stats = (await api('/surveys', admin)).data[0];
+    assert.equal(stats.responseCount, 1);
+    assert.deepEqual(stats.averages, [5, 3]);
+    assert.equal((await api('/account/me', token)).data.surveyCompleted[0], survey.id);
+    assert.equal((await api('/public/surveys')).data[0].responses, undefined);
+    assert.equal(
+      (await api(`/surveys/${survey.id}`, admin, { questions: ['Changed'] }, 'PATCH')).status,
+      409,
+    );
+    await api(`/surveys/${survey.id}`, admin, { active: false }, 'PATCH');
+    assert.equal((await api('/public/surveys')).data.length, 0);
+    const c = (await api('/courses', admin, { title: 'Course' })).data,
+      l = (
+        await api(`/courses/${c.id}/lessons`, admin, {
+          title: 'Lesson',
+          description: 'Read me',
+          durationMinutes: 2,
+          questionItems: qs,
+        })
+      ).data;
+    assert.equal(
+      (
+        await api(
+          `/courses/${c.id}/pre-test`,
+          admin,
+          { title: 'Baseline', questionItems: qs },
+          'PATCH',
+        )
+      ).status,
+      200,
+    );
+    const publicCourse = (await api('/public/courses')).data.find((x) => x.id === c.id);
+    assert.equal(publicCourse.preTest.questionItems[0].answer, undefined);
+    assert.equal(
+      (await api(`/account/courses/${c.id}/lessons/${l.id}/test`, token, { answers: [1, 0] }))
+        .status,
+      409,
+    );
+    const before = await api(`/account/courses/${c.id}/pre-test`, token, { answers: [0, 1] });
+    assert.equal(before.data.score, 0);
+    assert.equal(
+      (await api(`/account/courses/${c.id}/pre-test`, token, { answers: [1, 0] })).data.score,
+      0,
+    );
+    const failed = await api(`/account/courses/${c.id}/lessons/${l.id}/test`, token, {
+      answers: [0, 0],
+    });
+    assert.equal(failed.data.score, 1);
+    assert.equal(failed.data.passed, false);
+    assert.equal(failed.data.progress[c.id].lessons.length, 0);
+    const passed = await api(`/account/courses/${c.id}/lessons/${l.id}/test`, token, {
+      answers: [1, 0],
+    });
+    assert.equal(passed.data.passed, true);
+    assert.equal(passed.data.progress[c.id].lessons[0], l.id);
+    await api(
+      `/courses/${c.id}/test`,
+      admin,
+      { title: 'Post', passPercent: 80, questionItems: qs },
+      'PATCH',
+    );
+    const post = await api(`/account/courses/${c.id}/exam`, token, { answers: [1, 0] });
+    assert.equal(post.data.passed, true);
+    await api(`/account/courses/${c.id}/exam`, token, { answers: [0, 1] });
+    analytics = (await api('/analytics', admin)).data;
+    const result = analytics.courses.find((x) => x.id === c.id);
+    assert.equal(result.paired, 1);
+    assert.equal(result.improvement, 100);
+    assert.equal(result.completion, 100);
+    await api(
+      `/courses/${c.id}/pre-test`,
+      admin,
+      { title: 'Baseline revised', questionItems: [qs[0]] },
+      'PATCH',
+    );
+    assert.equal(
+      (await api('/analytics', admin)).data.courses.find((x) => x.id === c.id).paired,
+      0,
+    );
+    await stop();
+    await start();
+    assert.equal((await api('/analytics', admin)).data.emptySearches, 1);
 
-  const premium=(await api('/tests',admin,{title:'Premium',category:'Хүүхэд',premium:true,questionItems:qs})).data;
-  assert.equal((await api('/public/practice')).data.find(x=>x.id===premium.id).questionItems.length,0);
-  assert.equal((await api(`/account/practice/${premium.id}/start`,token,{})).status,403);
-  const userId=(await api('/account/me',token)).data.user.id;
-  await api(`/users/${userId}`,admin,{memberLevel:'premium',paymentStatus:'unpaid'},'PATCH');
-  assert.equal((await api('/account/practice',token)).data.find(x=>x.id===premium.id).locked,false);
-  const pp=(await api(`/account/practice/${premium.id}/start`,token,{})).data.practice[premium.id];
-  await api(`/users/${userId}`,admin,{memberLevel:'bronze',paymentStatus:'unpaid'},'PATCH');
-  assert.equal((await api(`/account/practice/${premium.id}/answer`,token,{attemptId:pp.attemptId,answers:[1]})).status,403);
-  assert.equal((await api('/account/me',token)).data.practice[premium.id],undefined);
-  const screening={requestId:'screening-test-123',patientCode:'P001',patientName:'Sample Patient',age:35,sex:'Эмэгтэй',heightCm:170,weightKg:70,waistCm:85,bloodPressureUsed:true,glucoseUsed:true,systolic:120,diastolic:80,glucose:5.2};
-  assert.equal((await api('/account/screenings',null,screening)).status,401);
-  assert.equal((await api('/assessments',null,screening)).status,401);
-  assert.equal((await api('/account/screenings',token,{...screening,heightCm:0})).status,400);
-  const sc=await api('/account/screenings',token,{...screening,doctorId:'spoof'});assert.equal(sc.status,201);assert.equal(sc.data.doctorId,userId);assert.equal(sc.data.bmi,24.2);assert.equal(sc.data.glucose,5.2);
-  assert.equal((await api('/account/screenings',token,screening)).data.id,sc.data.id);
-  assert.equal((await api('/account/screenings',token)).data.length,1);
-  const adminAccount=(await api('/account/login',null,{email:'admin@test.test',password})).data.token;
-  assert.equal((await api('/account/screenings',adminAccount)).data.length,0);
-  const game=(await api('/games',admin,{title:'Memory',type:'memory',active:true,items:['One','Two']})).data;
-  assert.equal((await api('/games',token,{title:'Bad',type:'memory',active:true,items:['One','Two']})).status,403);
-  assert.equal((await api('/games',admin,{title:'Bad',type:'memory',active:true,items:['One','One']})).status,400);
-  assert.equal((await api('/public/games')).data[0].id,game.id);
-  await api(`/games/${game.id}`,admin,{active:false},'PATCH');assert.equal((await api('/public/games')).data.length,0);
-  await stop();await start();assert.equal((await api('/account/screenings',token)).data[0].patientCode,'P001');
- }finally{await stop();await rm(dir,{recursive:true,force:true});}
+    const premium = (
+      await api('/tests', admin, {
+        title: 'Premium',
+        category: 'Хүүхэд',
+        premium: true,
+        questionItems: qs,
+      })
+    ).data;
+    assert.equal(
+      (await api('/public/practice')).data.find((x) => x.id === premium.id).questionItems.length,
+      0,
+    );
+    assert.equal((await api(`/account/practice/${premium.id}/start`, token, {})).status, 403);
+    const userId = (await api('/account/me', token)).data.user.id;
+    await api(
+      `/users/${userId}`,
+      admin,
+      { memberLevel: 'premium', paymentStatus: 'unpaid' },
+      'PATCH',
+    );
+    assert.equal(
+      (await api('/account/practice', token)).data.find((x) => x.id === premium.id).locked,
+      false,
+    );
+    const pp = (await api(`/account/practice/${premium.id}/start`, token, {})).data.practice[
+      premium.id
+    ];
+    await api(
+      `/users/${userId}`,
+      admin,
+      { memberLevel: 'bronze', paymentStatus: 'unpaid' },
+      'PATCH',
+    );
+    assert.equal(
+      (
+        await api(`/account/practice/${premium.id}/answer`, token, {
+          attemptId: pp.attemptId,
+          answers: [1],
+        })
+      ).status,
+      403,
+    );
+    assert.equal((await api('/account/me', token)).data.practice[premium.id], undefined);
+    const screening = {
+      requestId: 'screening-test-123',
+      patientCode: 'P001',
+      patientName: 'Sample Patient',
+      age: 35,
+      sex: 'Эмэгтэй',
+      heightCm: 170,
+      weightKg: 70,
+      waistCm: 85,
+      bloodPressureUsed: true,
+      glucoseUsed: true,
+      systolic: 120,
+      diastolic: 80,
+      glucose: 5.2,
+    };
+    assert.equal((await api('/account/screenings', null, screening)).status, 401);
+    assert.equal((await api('/assessments', null, screening)).status, 401);
+    assert.equal(
+      (await api('/account/screenings', token, { ...screening, heightCm: 0 })).status,
+      400,
+    );
+    const sc = await api('/account/screenings', token, { ...screening, doctorId: 'spoof' });
+    assert.equal(sc.status, 201);
+    assert.equal(sc.data.doctorId, userId);
+    assert.equal(sc.data.bmi, 24.2);
+    assert.equal(sc.data.glucose, 5.2);
+    assert.equal((await api('/account/screenings', token, screening)).data.id, sc.data.id);
+    assert.equal((await api('/account/screenings', token)).data.length, 1);
+    const adminAccount = (await api('/account/login', null, { email: 'admin@test.test', password }))
+      .data.token;
+    assert.equal((await api('/account/screenings', adminAccount)).data.length, 0);
+    const game = (
+      await api('/games', admin, {
+        title: 'Memory',
+        type: 'memory',
+        active: true,
+        items: ['One', 'Two'],
+      })
+    ).data;
+    assert.equal(
+      (
+        await api('/games', token, {
+          title: 'Bad',
+          type: 'memory',
+          active: true,
+          items: ['One', 'Two'],
+        })
+      ).status,
+      403,
+    );
+    assert.equal(
+      (
+        await api('/games', admin, {
+          title: 'Bad',
+          type: 'memory',
+          active: true,
+          items: ['One', 'One'],
+        })
+      ).status,
+      400,
+    );
+    assert.equal((await api('/public/games')).data[0].id, game.id);
+    await api(`/games/${game.id}`, admin, { active: false }, 'PATCH');
+    assert.equal((await api('/public/games')).data.length, 0);
+    await stop();
+    await start();
+    assert.equal((await api('/account/screenings', token)).data[0].patientCode, 'P001');
+  } finally {
+    await stop();
+    await rm(dir, { recursive: true, force: true });
+  }
 });
