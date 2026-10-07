@@ -158,3 +158,17 @@ award it. Registration never accepts caller-supplied admin/Premium privileges.
 
 Configure actual legal/support details before release. Reports need regular human
 moderation. These workflows do not replace a production privacy/security review.
+
+## Local app preview and CORS
+
+The app preview at `http://127.0.0.1:5181` is allowed through
+`ADDITIONAL_ALLOWED_ORIGINS` (default: that exact origin), alongside the existing
+`ALLOWED_ORIGINS`. Values are comma separated; spaces are trimmed. Set
+`ADDITIONAL_ALLOWED_ORIGINS=` to explicitly disable preview access. Unknown
+origins are not granted access. Login preflight permits `Content-Type` and
+`Authorization`; protected routes still require valid tokens.
+
+Deploy the updated backend image and recreate the service for this change to
+take effect. Updating this repository alone does not change the live server.
+With the supplied Compose deployment, run `docker compose up -d --build backend`
+on the server. The existing Nginx `/app-api/` proxy forwards OPTIONS to Express.

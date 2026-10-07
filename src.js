@@ -24,10 +24,26 @@ const dataDir = process.env.DATA_DIR || join(here, 'data');
 await mkdir(dataDir, { recursive: true });
 const databasePath = join(dataDir, 'db.json');
 
-const allowedOrigins = (
-  process.env.ALLOWED_ORIGINS || 'http://127.0.0.1:5180,http://localhost:5180,http://127.0.0.1:5179'
-).split(',');
-app.use(cors({ origin: (origin, cb) => cb(null, !origin || allowedOrigins.includes(origin)) }));
+// Keep deployed origins and the explicitly enabled local app preview together.
+// Set ADDITIONAL_ALLOWED_ORIGINS to an empty value to disable preview access.
+const allowedOrigins = new Set(
+  [
+    process.env.ALLOWED_ORIGINS ||
+      'https://youthhealthpf.mn,http://127.0.0.1:5180,http://localhost:5180,http://127.0.0.1:5179',
+    process.env.ADDITIONAL_ALLOWED_ORIGINS ?? 'http://127.0.0.1:5181',
+  ]
+    .join(',')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+);
+app.use(
+  cors({
+    origin: (origin, cb) => cb(null, !origin || allowedOrigins.has(origin)),
+    methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  }),
+);
 app.disable('x-powered-by');
 app.use(express.json({ limit: '1mb' }));
 app.use(serializeMutations());
